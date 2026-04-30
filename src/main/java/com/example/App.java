@@ -4,19 +4,39 @@ import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 
+import static org.apache.spark.sql.functions.concat;
+import static org.apache.spark.sql.functions.lit;
+import static org.apache.spark.sql.functions.col;
+
 
 public class App 
 {
     public static void main(String[] args)
     {
-        SparkSession spark = SparkSession.builder().appName("Spark Hello World").master("local[*]").getOrCreate();
+        SparkSession spark = SparkSession.builder().appName("CSV TO DB").master("local[*]").getOrCreate();
 
-        System.out.println("Hello, World");
+        Dataset<Row> df = spark.read().format("csv").option("header", "true").load("authors.csv");
 
-        Dataset<Row> df = spark.read().json(spark.emptyDataset(org.apache.spark.sql.Encoders.STRING()));
+        
+        df.select(col("lname"), col("fname")).show();
+        
+        df.select(
+            concat(
+                col("lname"), lit(","), col("fname")
+            )
+        ).show();
 
-        df.show();
+        df = df.withColumn(
+            "ale", 
+            concat(
+                col("lname"), lit(","), col("fname")
+            )
+        );
 
+
+        df.show(5);
+        
+        
         spark.stop();
 
     }
