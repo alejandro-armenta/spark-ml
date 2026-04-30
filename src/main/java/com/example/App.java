@@ -13,31 +13,49 @@ public class App
 {
     public static void main(String[] args)
     {
-        SparkSession spark = SparkSession.builder().appName("CSV TO DB").master("local[*]").getOrCreate();
+        SparkSession spark = SparkSession.builder().appName("Restaurants in Wake County, NC").master("local[*]").getOrCreate();
 
-        Dataset<Row> df = spark.read().format("csv").option("header", "true").load("authors.csv");
+        spark.sparkContext().setLogLevel("WARN");
 
-        
-        df.select(col("lname"), col("fname")).show();
-        
-        df.select(
+        Dataset<Row> df = spark.read().format("csv").option("header", "true").load("Restaurants_in_Wake_County_NC.csv");        
+
+        df.show();
+
+        df.printSchema();
+
+        System.out.println("RECORDS: " + df.count());
+
+
+        df = df.
+        drop(col("OBJECTID")).
+        drop(col("PERMITID")).
+        drop(col("GEOCODESTATUS")).
+        withColumn("county", lit("Wake")).
+        withColumnRenamed("HSISID", "datasetId").
+        withColumnRenamed("NAME", "name").
+        withColumnRenamed("ADDRESS1", "address1").
+        withColumnRenamed("ADDRESS2", "address2").
+        withColumnRenamed("CITY", "city").
+        withColumnRenamed("STATE", "state").
+        withColumnRenamed("POSTALCODE", "zip").
+        withColumnRenamed("PHONENUMBER", "tel").
+        withColumnRenamed("RESTAURANTOPENDATE", "dateStart").
+        withColumnRenamed("FACILITYTYPE", "type").
+        withColumnRenamed("X", "geoX").
+        withColumnRenamed("Y", "geoY")
+        ;
+
+        df.show();
+
+        df.
+        withColumn(
+            "id", 
             concat(
-                col("lname"), lit(","), col("fname")
+                col("state"), lit("_"), col("county"), lit("_"), col("datasetId")
             )
-        ).show();
+        ).
+        show();
 
-        df = df.withColumn(
-            "ale", 
-            concat(
-                col("lname"), lit(","), col("fname")
-            )
-        );
-
-
-        df.show(5);
-        
-        
-        spark.stop();
 
     }
 }
