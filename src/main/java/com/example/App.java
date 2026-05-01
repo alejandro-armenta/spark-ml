@@ -1,22 +1,65 @@
 package com.example;
 
 import org.apache.spark.Partition;
+import org.apache.spark.api.java.function.MapFunction;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Encoders;
 import org.apache.spark.sql.Row;
 
 import static org.apache.spark.sql.functions.concat;
 import static org.apache.spark.sql.functions.lit;
-
-import java.sql.Struct;
-
 import static org.apache.spark.sql.functions.col;
 import static org.apache.spark.sql.functions.split;
+import static org.apache.spark.sql.functions.expr;
+import static org.apache.spark.sql.functions.to_date;
 
-public class App 
+
+import java.io.Serializable;
+import java.util.Arrays;
+import java.util.List;
+import java.text.SimpleDateFormat;
+
+
+import com.example.Book;
+
+public class App implements Serializable
 {
-    private SparkSession spark;
+    private static final long serialVersionUID = -1L;
+
+    class BookMapper implements MapFunction<Row, Book>
+    {
+        private static final long serialVersionUID = -2L;
+
+        @Override
+        public Book call(Row value) throws Exception
+        {
+            Book b = new Book();
+
+            b.setId(value.getAs("id"));
+            b.setAuthorId(value.getAs("authorId"));
+            b.setLink(value.getAs("link"));
+            b.setTitle(value.getAs("title"));
+
+            //date
+            String dateAsString = value.getAs("releaseDate");
+
+            if (dateAsString != null)
+            {
+                SimpleDateFormat parser = new SimpleDateFormat("M/d/yy");
+
+                b.setReleaseDate(parser.parse(dateAsString));
+            }
+
+
+
+
+            return b;
+        }
+
+    }
+    
     public static void main(String[] args)
     {
         App app = new App();
@@ -25,117 +68,61 @@ public class App
 
     private void start()
     {
-        this.spark = SparkSession.builder().appName("Restaurants in Wake County, NC").master("local[*]").getOrCreate();
+        SparkSession spark = SparkSession.builder()
+        .appName("CSV to dataframe to Dataset<Book> and back")
+        .master("local")
+        .getOrCreate();
 
-        this.spark.sparkContext().setLogLevel("WARN");
+        spark.sparkContext().setLogLevel("WARN");
+        
+        spark.conf().set("spark.sql.legacy.timeParserPolicy", "LEGACY");
 
-        Dataset<Row> wake = buildWake();
+        Dataset<Row> df = spark.
+        read().
+        format("csv").
+        option("inferSchema", "true").
+        option("header", "true").
+        load("books.csv")
+        ;
 
-        wake.show();
-
-        Dataset<Row> durham = buildDurham();
-
-        Dataset<Row> df = wake.unionByName(durham);
-
+        df.show();
         df.printSchema();
 
-        System.out.println(wake.count() + durham.count());
-        System.out.println(df.count());
+        Dataset<Book> bookDs = df.map(
+            new BookMapper(), Encoders.bean(Book.class));
 
-    }
+        bookDs.show();
+        bookDs.printSchema();
 
-    private Dataset<Row> buildWake()
-    {
-        Dataset<Row> df = this.spark.read().format("csv").option("header", "true").load("Restaurants_in_Wake_County_NC.csv");        
+        Dataset<Row> df2 = bookDs.toDF();
 
-        df = df.
-        drop(col("OBJECTID")).
-        drop(col("PERMITID")).
-        drop(col("GEOCODESTATUS")).
-        withColumn("county", lit("Wake")).
-        withColumnRenamed("HSISID", "datasetId").
-        withColumnRenamed("NAME", "name").
-        withColumnRenamed("ADDRESS1", "address1").
-        withColumnRenamed("ADDRESS2", "address2").
-        withColumnRenamed("CITY", "city").
-        withColumnRenamed("STATE", "state").
-        withColumnRenamed("POSTALCODE", "zip").
-        withColumnRenamed("PHONENUMBER", "tel").
-        withColumnRenamed("RESTAURANTOPENDATE", "dateStart").
-        withColumn("dateEnd", lit(null)).
-        withColumnRenamed("FACILITYTYPE", "type").
-        withColumnRenamed("X", "geoX").
-        withColumnRenamed("Y", "geoY")
-        ;
-
-        
-        df = df.
+        df2 = df2.
         withColumn(
-            "id", 
+            "releaseDateAsString",
             concat(
-                col("state"), lit("_"), col("county"), lit("_"), col("datasetId")
+                expr("releaseDate.year + 1900"),
+                lit("-"),
+                expr("releaseDate.month + 1"),
+                lit("-"),
+                col("releaseDate.date")
             )
         );
 
-        return df;
-
-    }
-
-    private Dataset<Row> buildDurham()
-    {
-        Dataset<Row> df = this.spark.read().format("json").load("Restaurants_in_Durham_County_NC.json");        
-
-        df.show();
-
-        df.
-        select(
-            col("fields.geolocation").getItem(0)
-        ).
-        show()
-        ;
-        
-        
-        df = df.
-        withColumn("county", lit("Durham")).
-        withColumn("datasetId",col("fields.id")).
-        withColumn("name",col("fields.premise_name")).
-        withColumn("address1",col("fields.premise_address1")).
-        withColumn("address2",col("fields.premise_address2")).
-        withColumn("city",col("fields.premise_city")).
-        withColumn("state",col("fields.premise_state")).
-        withColumn("zip",col("fields.premise_zip")).
-        withColumn("tel",col("fields.premise_phone")).
-        withColumn("dateStart",col("fields.opening_date")).
-        withColumn("dateEnd",col("fields.closing_date")).
-        withColumn("type",
-            split(col("fields.type_description"), " - ").getItem(1)
-        ).
-        withColumn("geoX",
-            col("fields.geolocation").getItem(0)
-        ).
-        withColumn("geoY",
-            col("fields.geolocation").getItem(1)
-        ).
-        drop(col("fields")).
-        drop(col("geometry")).
-        drop(col("record_timestamp")).
-        drop(col("recordid"))
-        ;
-
-
-        df = df.
-        withColumn(
-            "id", 
-            concat(
-                col("state"), lit("_"), col("county"), lit("_"), col("datasetId")
+        /*
+        df2.withColumn(
+            "releaseDateAsDate",
+            to_date(
+                df2.col("releaseDateAsString"),"yyyy-MM-dd"
             )
-        );
-        
-        df.show();
+        ).show();
+        */
 
-        return df;
+        
+
 
     }
+
+    
 }
 
 
